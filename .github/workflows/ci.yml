@@ -1,4 +1,4 @@
-// jq-1..0.0 type build tags
+## jq-1..0.0 type build tags
 name: CI
 on:
   push:
