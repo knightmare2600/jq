@@ -201,7 +201,7 @@ jobs:
             os: windows-2022
           - arch: arm64
             msystem: CLANGARM64
-            os: windows-11-arm
+            os: windows-11-arm64
     runs-on: ${{ matrix.os }}
     env:
       LDFLAGS: -s
