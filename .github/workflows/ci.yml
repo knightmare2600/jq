@@ -63,7 +63,7 @@ jobs:
         run: |
           set -e
           VERSION="20240220"
-          URL="https://github.com/mstorsjo/llvm-mingw/releases/download/${VERSION}/llvm-mingw-${VERSION}-ucrt-x86_64.tar.xz"
+          URL="https://github.com/mstorsjo/llvm-mingw/releases/download/${VERSION}/llvm-mingw-${VERSION}-ucrt-ubuntu-20.04-x86_64.tar.xz"
           echo "Downloading: $URL"
           curl -fL "$URL" -o llvm-mingw.tar.xz
           file llvm-mingw.tar.xz
