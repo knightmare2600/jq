@@ -87,17 +87,23 @@ jobs:
           CC="${{ matrix.cc }}"
 
           if [[ "$ARCH" == win-* ]]; then
-            CC=clang
+            TARGET="$HOST"
+
+            export CC="clang --target=$TARGET"
+            export CXX="clang++ --target=$TARGET"
+            export AR="llvm-ar"
+            export RANLIB="llvm-ranlib"
+            export LDFLAGS="-fuse-ld=lld"
+
             OUT="jq-windows-${ARCH#win-}.exe"
           else
+            export CC="$CC"
             OUT="jq-${ARCH}"
           fi
 
           echo "ARCH=$ARCH"
           echo "HOST=$HOST"
           echo "CC=$CC"
-
-          export CC
 
           ./configure \
             --host="$HOST" \
