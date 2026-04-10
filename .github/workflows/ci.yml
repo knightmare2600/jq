@@ -63,12 +63,12 @@ jobs:
         run: |
           set -e
 
-          curl -L \
-            https://github.com/mstorsjo/llvm-mingw/releases/download/20240220/llvm-mingw-20240220-ucrt-ubuntu-20.04-x86_64.tar.xz \
-            -o llvm-mingw.tar.xz
+          URL=$(curl -s https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest | grep "browser_download_url" | grep "x86_64.*ucrt.*tar.xz" | cut -d '"' -f 4)
+          echo "Downloading: $URL"
 
+          curl -L "$URL" -o llvm-mingw.tar.xz
+          file llvm-mingw.tar.xz
           tar -xf llvm-mingw.tar.xz
-
           LLVM_DIR=$(find . -maxdepth 1 -type d -name "llvm-mingw-*")
           echo "$PWD/$LLVM_DIR/bin" >> $GITHUB_PATH
 
