@@ -1,3 +1,13 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["jq-*"]
+  pull_request:
+
+jobs:
+
   linux:
     strategy:
       fail-fast: false
@@ -11,12 +21,7 @@
           - mips
           - mips64
           - mips64el
-          - mips64r6
-          - mips64r6el
           - mipsel
-          - mipsr6
-          - mipsr6el
-          - powerpc
           - ppc64el
           - riscv64
           - s390x
@@ -38,18 +43,8 @@
             CC: mips64-linux-gnuabi64
           - arch: mips64el
             CC: mips64el-linux-gnuabi64
-          - arch: mips64r6
-            CC: mipsisa64r6-linux-gnuabi64
-          - arch: mips64r6el
-            CC: mipsisa64r6el-linux-gnuabi64
           - arch: mipsel
             CC: mipsel-linux-gnu
-          - arch: mipsr6
-            CC: mipsisa32r6-linux-gnu
-          - arch: mipsr6el
-            CC: mipsisa32r6el-linux-gnu
-          - arch: powerpc
-            CC: powerpc-linux-gnu
           - arch: ppc64el
             CC: powerpc64le-linux-gnu
           - arch: riscv64
@@ -63,14 +58,12 @@
 
     env:
       AR: ${{ matrix.CC }}-ar
-      CHOST: ${{ matrix.CC }}
       CC: ${{ matrix.CC }}-gcc
       CPP: ${{ matrix.CC }}-cpp
       LDFLAGS: -s
 
     steps:
-      - name: Clone repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -102,26 +95,110 @@
             --enable-all-static \
             CFLAGS="-O2 -pthread -fstack-protector-all"
 
-          make -j"$(nproc)"
+          make -j$(nproc)
 
           if [ "${{ matrix.arch }}" = "win-arm64" ]; then
-            cp ./jq.exe $OUTPUT
+            cp jq.exe $OUTPUT
           else
-            cp ./jq $OUTPUT
+            cp jq $OUTPUT
           fi
 
       - name: Test
-        if: ${{ matrix.arch == 'amd64' }}
+        if: matrix.arch == 'amd64'
         run: |
           make check VERBOSE=yes
           git diff --exit-code
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
           name: jq-${{ matrix.arch }}
           path: |
             jq-linux-*
             jq-windows-arm64.exe
-          if-no-files-found: error
-          retention-days: 7
+
+  macos:
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            target: x86_64-apple-darwin
+          - arch: arm64
+            target: arm64-apple-darwin
+
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - run: |
+          brew update || brew update-reset
+          brew install autoconf automake libtool
+
+      - run: echo "CC=clang -target ${{ matrix.target }}" >> $GITHUB_ENV
+
+      - run: |
+          autoreconf -i
+          ./configure \
+            --host=${{ matrix.target }} \
+            --disable-docs \
+            --with-oniguruma=builtin \
+            --enable-static \
+            --enable-all-static
+
+          make -j$(sysctl -n hw.logicalcpu)
+          strip jq
+          cp jq jq-macos-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jq-macos-${{ matrix.arch }}
+          path: jq-macos-${{ matrix.arch }}
+
+  windows:
+    strategy:
+      matrix:
+        arch: [amd64, i386]
+        include:
+          - arch: amd64
+            msystem: UCRT64
+            os: windows-2022
+          - arch: i386
+            msystem: MINGW32
+            os: windows-2022
+
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          msystem: ${{ matrix.msystem }}
+          install: base-devel git autoconf automake libtool
+          pacboy: toolchain:p
+
+      - run: |
+          autoreconf -i
+          ./configure \
+            --disable-docs \
+            --with-oniguruma=builtin \
+            --enable-static \
+            --enable-all-static
+
+          make -j$(nproc)
+          cp jq.exe jq-windows-${{ matrix.arch }}.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jq-windows-${{ matrix.arch }}
+          path: jq-windows-${{ matrix.arch }}.exe
