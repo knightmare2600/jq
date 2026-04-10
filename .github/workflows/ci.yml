@@ -25,8 +25,12 @@ jobs:
           - ppc64el
           - riscv64
           - s390x
+          - win-amd64
+          - win-i386
           - win-arm64
+
         include:
+          # Linux targets
           - arch: amd64
             CC: x86_64-linux-gnu
           - arch: arm64
@@ -51,39 +55,51 @@ jobs:
             CC: riscv64-linux-gnu
           - arch: s390x
             CC: s390x-linux-gnu
+
+          # Windows targets via LLVM MinGW
+          - arch: win-amd64
+            TARGET: x86_64-w64-mingw32
+          - arch: win-i386
+            TARGET: i686-w64-mingw32
           - arch: win-arm64
-            CC: aarch64-w64-mingw32
+            TARGET: aarch64-w64-mingw32
 
-    runs-on: ${{ matrix.arch == 'i386' && 'ubuntu-22.04' || 'ubuntu-24.04' }}
-
-    env:
-      AR: ${{ matrix.CC }}-ar
-      CC: ${{ matrix.CC }}-gcc
-      CPP: ${{ matrix.CC }}-cpp
-      LDFLAGS: -s
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: true
 
-      - name: Install packages
+      - name: Install Linux cross toolchains
+        if: startsWith(matrix.arch, 'win-') == false
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             automake autoconf libtool \
-            crossbuild-essential-${{ matrix.arch }} \
-            ${{ matrix.arch == 'win-arm64' && 'gcc-aarch64-w64-mingw32' || '' }}
+            crossbuild-essential-${{ matrix.arch }}
+
+      - name: Install LLVM MinGW (Windows builds)
+        if: startsWith(matrix.arch, 'win-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld curl xz-utils
+
+          curl -L https://github.com/mstorsjo/llvm-mingw/releases/latest/download/llvm-mingw-20240220-ucrt-ubuntu-20.04-x86_64.tar.xz -o llvm-mingw.tar.xz
+          tar -xf llvm-mingw.tar.xz
+          echo "$PWD/llvm-mingw-*/bin" >> $GITHUB_PATH
 
       - name: Build
         run: |
           autoreconf -i
 
-          if [ "${{ matrix.arch }}" = "win-arm64" ]; then
-            HOST=aarch64-w64-mingw32
-            OUTPUT=jq-windows-arm64.exe
+          if [[ "${{ matrix.arch }}" == win-* ]]; then
+            HOST=${{ matrix.TARGET }}
+            CC=clang
+            OUTPUT=jq-windows-${{ matrix.arch#win- }}.exe
           else
             HOST=${{ matrix.CC }}
+            CC=${{ matrix.CC }}-gcc
             OUTPUT=jq-linux-${{ matrix.arch }}
           fi
 
@@ -93,28 +109,32 @@ jobs:
             --with-oniguruma=builtin \
             --enable-static \
             --enable-all-static \
+            CC=$CC \
             CFLAGS="-O2 -pthread -fstack-protector-all"
 
           make -j$(nproc)
 
-          if [ "${{ matrix.arch }}" = "win-arm64" ]; then
+          if [[ "${{ matrix.arch }}" == win-* ]]; then
             cp jq.exe $OUTPUT
           else
             cp jq $OUTPUT
           fi
 
-      - name: Test
+      - name: Test (native only)
         if: matrix.arch == 'amd64'
         run: |
           make check VERBOSE=yes
           git diff --exit-code
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
         with:
           name: jq-${{ matrix.arch }}
           path: |
             jq-linux-*
-            jq-windows-arm64.exe
+            jq-windows-*.exe
+          if-no-files-found: error
+          retention-days: 7
 
   macos:
     strategy:
@@ -157,48 +177,58 @@ jobs:
           name: jq-macos-${{ matrix.arch }}
           path: jq-macos-${{ matrix.arch }}
 
-  windows:
-    strategy:
-      matrix:
-        arch: [amd64, i386]
-        include:
-          - arch: amd64
-            msystem: UCRT64
-            os: windows-2022
-          - arch: i386
-            msystem: MINGW32
-            os: windows-2022
-
-    runs-on: ${{ matrix.os }}
-
-    defaults:
-      run:
-        shell: msys2 {0}
+  dist:
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: true
 
-      - uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          msystem: ${{ matrix.msystem }}
-          install: base-devel git autoconf automake libtool
-          pacboy: toolchain:p
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y automake autoconf
 
       - run: |
           autoreconf -i
-          ./configure \
-            --disable-docs \
-            --with-oniguruma=builtin \
-            --enable-static \
-            --enable-all-static
-
-          make -j$(nproc)
-          cp jq.exe jq-windows-${{ matrix.arch }}.exe
+          ./configure --disable-docs --with-oniguruma=builtin
+          make distcheck
+          make dist dist-zip
 
       - uses: actions/upload-artifact@v7
         with:
-          name: jq-windows-${{ matrix.arch }}
-          path: jq-windows-${{ matrix.arch }}.exe
+          name: jq-dist
+          path: |
+            jq-*.tar.gz
+            jq-*.zip
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [linux, macos, dist]
+    if: startsWith(github.ref, 'refs/tags/jq-')
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: jq-*
+          merge-multiple: true
+
+      - name: Upload release
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp jq-linux-amd64 jq-linux64
+          cp jq-macos-amd64 jq-osx-amd64
+          cp jq-windows-amd64.exe jq-win64.exe
+
+          sha256sum jq-* > sha256sum.txt
+
+          gh release create "$TAG_NAME" \
+            --draft \
+            --title "jq ${TAG_NAME#jq-}" \
+            --generate-notes
+
+          gh release upload "$TAG_NAME" --clobber jq-* sha256sum.txt
