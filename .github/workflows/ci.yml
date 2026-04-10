@@ -63,21 +63,9 @@ jobs:
         run: |
           set -e
           VERSION="20240220"
-          BASE_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/${VERSION}"
-          case "${{ matrix.host }}" in
-            x86_64-w64-mingw32)
-              FILE="llvm-mingw-${VERSION}-ucrt-x86_64.tar.xz"
-              ;;
-            i686-w64-mingw32)
-              FILE="llvm-mingw-${VERSION}-ucrt-i686.tar.xz"
-              ;;
-            aarch64-w64-mingw32)
-              FILE="llvm-mingw-${VERSION}-ucrt-aarch64.tar.xz"
-              ;;
-          esac
-          URL="${BASE_URL}/${FILE}"
+          URL="https://github.com/mstorsjo/llvm-mingw/releases/download/${VERSION}/llvm-mingw-${VERSION}-ucrt-x86_64.tar.xz"
           echo "Downloading: $URL"
-          curl -L "$URL" -o llvm-mingw.tar.xz
+          curl -fL "$URL" -o llvm-mingw.tar.xz
           file llvm-mingw.tar.xz
           tar -xf llvm-mingw.tar.xz
           LLVM_DIR=$(find . -maxdepth 1 -type d -name "llvm-mingw-*")
