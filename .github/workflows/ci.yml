@@ -16,9 +16,7 @@ jobs:
       matrix:
         include:
 
-          # -------------------------
-          # Linux targets
-          # -------------------------
+          # ---------------- Linux ----------------
           - arch: linux-amd64
             host: x86_64-linux-gnu
             cc: gcc
@@ -31,9 +29,7 @@ jobs:
             host: i686-linux-gnu
             pkg: gcc-i686-linux-gnu
 
-          # -------------------------
-          # Windows via LLVM MinGW
-          # -------------------------
+          # ---------------- Windows (LLVM MinGW) ----------------
           - arch: win-amd64
             host: x86_64-w64-mingw32
 
@@ -49,26 +45,19 @@ jobs:
         with:
           submodules: true
 
-      # -------------------------
-      # Install Linux toolchains
-      # -------------------------
-      - name: Install toolchains
+      # ---------------- Dependencies ----------------
+      - name: Install dependencies
         run: |
           sudo apt-get update
-
-          # base build tools (always valid on noble)
           sudo apt-get install -y \
             autoconf automake libtool \
             clang lld curl xz-utils make
 
-          # install ONLY if defined
-          if [[ "${{ matrix.pkg }}" != "" ]]; then
-            sudo apt-get install -y ${{ matrix.pkg }}
+          if [ -n "${{ matrix.pkg }}" ]; then
+            sudo apt-get install -y "${{ matrix.pkg }}"
           fi
 
-      # -------------------------
-      # LLVM MinGW (stable release, NOT latest)
-      # -------------------------
+      # ---------------- LLVM MinGW ----------------
       - name: Install LLVM MinGW
         if: startsWith(matrix.arch, 'win-')
         run: |
@@ -78,30 +67,29 @@ jobs:
             https://github.com/mstorsjo/llvm-mingw/releases/download/20240220/llvm-mingw-20240220-ucrt-ubuntu-20.04-x86_64.tar.xz \
             -o llvm-mingw.tar.xz
 
-          ls -lh llvm-mingw.tar.xz
-
           tar -xf llvm-mingw.tar.xz
 
           LLVM_DIR=$(find . -maxdepth 1 -type d -name "llvm-mingw-*")
           echo "$PWD/$LLVM_DIR/bin" >> $GITHUB_PATH
 
-      # -------------------------
-      # Build
-      # -------------------------
-      - name: Build
+  # ---------------- BUILD (Linux + Windows) ----------------
+      - name: Build (Linux & Windows)
         run: |
           set -e
           autoreconf -i
 
           ARCH="${{ matrix.arch }}"
+          HOST="${{ matrix.host }}"
 
           if [[ "$ARCH" == win-* ]]; then
-            HOST="${{ matrix.host }}"
             CC=clang
             OUT="jq-${ARCH}.exe"
           else
-            HOST="${{ matrix.host }}"
-            CC="${{ matrix.cc:-${{ matrix.pkg }}-gcc }}"
+            if [ -n "${{ matrix.cc }}" ]; then
+              CC="${{ matrix.cc }}"
+            else
+              CC="${{ matrix.pkg }}-gcc"
+            fi
             OUT="jq-${ARCH}"
           fi
 
@@ -113,7 +101,7 @@ jobs:
             CC="$CC" \
             CFLAGS="-O2"
 
-          make -j$(nproc)
+          make -j"$(nproc)"
 
           if [[ "$ARCH" == win-* ]]; then
             cp jq.exe "$OUT"
@@ -121,38 +109,87 @@ jobs:
             cp jq "$OUT"
           fi
 
-      # -------------------------
-      # Test only native
-      # -------------------------
+      # ---------------- Test ----------------
       - name: Test
         if: matrix.arch == 'linux-amd64'
-        run: |
-          make check
+        run: make check
 
-      # -------------------------
-      # Upload artifacts
-      # -------------------------
+      # ---------------- Artifacts ----------------
       - uses: actions/upload-artifact@v4
         with:
           name: jq-${{ matrix.arch }}
           path: jq-*
           if-no-files-found: error
 
-  # -------------------------
-  # Release
-  # -------------------------
+
+  # =========================================================
+  # macOS JOB (RESTORED PROPERLY)
+  # =========================================================
+  macos:
+    runs-on: macos-14
+
+    strategy:
+      matrix:
+        include:
+
+          - arch: macos-amd64
+            target: x86_64-apple-darwin
+
+          - arch: macos-arm64
+            target: arm64-apple-darwin
+
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install dependencies
+        run: |
+          brew update || true
+          brew install autoconf automake libtool
+
+      - name: Build macOS
+        run: |
+          set -e
+          autoreconf -i
+
+          export CC="clang -target ${{ matrix.target }}"
+          export CFLAGS="-O2"
+
+          ./configure \
+            --host="${{ matrix.target }}" \
+            --disable-docs \
+            --with-oniguruma=builtin \
+            --enable-static \
+            CC="$CC" \
+            CFLAGS="$CFLAGS"
+
+          make -j"$(sysctl -n hw.logicalcpu)"
+
+          strip jq
+          cp jq "${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jq-${{ matrix.arch }}
+          path: jq-*
+
+
+  # ---------------- Release ----------------
   release:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, macos]
     if: startsWith(github.ref, 'refs/tags/jq-')
 
     steps:
+
       - uses: actions/download-artifact@v4
         with:
           pattern: jq-*
           merge-multiple: true
 
-      - name: Release
+      - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
