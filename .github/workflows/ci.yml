@@ -19,7 +19,6 @@ jobs:
           # ---------------- Linux ----------------
           - arch: linux-amd64
             host: x86_64-linux-gnu
-            cc: gcc
 
           - arch: linux-arm64
             host: aarch64-linux-gnu
@@ -51,7 +50,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             autoconf automake libtool \
-            clang lld curl xz-utils make
+            clang lld curl xz-utils make \
+            gcc-aarch64-linux-gnu gcc-i686-linux-gnu
 
           if [ -n "${{ matrix.pkg }}" ]; then
             sudo apt-get install -y "${{ matrix.pkg }}"
@@ -72,8 +72,8 @@ jobs:
           LLVM_DIR=$(find . -maxdepth 1 -type d -name "llvm-mingw-*")
           echo "$PWD/$LLVM_DIR/bin" >> $GITHUB_PATH
 
-  # ---------------- BUILD (Linux + Windows) ----------------
-      - name: Build (Linux & Windows)
+      # ---------------- Build ----------------
+      - name: Build
         run: |
           set -e
           autoreconf -i
@@ -85,20 +85,17 @@ jobs:
             CC=clang
             OUT="jq-${ARCH}.exe"
           else
-            if [ -n "${{ matrix.cc }}" ]; then
-              CC="${{ matrix.cc }}"
-            else
-              CC="${{ matrix.pkg }}-gcc"
-            fi
+            CC="${HOST}-gcc"
             OUT="jq-${ARCH}"
           fi
+
+          export CC
 
           ./configure \
             --host="$HOST" \
             --disable-docs \
             --with-oniguruma=builtin \
             --enable-static \
-            CC="$CC" \
             CFLAGS="-O2"
 
           make -j"$(nproc)"
@@ -110,7 +107,7 @@ jobs:
           fi
 
       # ---------------- Test ----------------
-      - name: Test
+      - name: Test (Linux only)
         if: matrix.arch == 'linux-amd64'
         run: make check
 
@@ -123,7 +120,7 @@ jobs:
 
 
   # =========================================================
-  # macOS JOB (RESTORED PROPERLY)
+  # macOS
   # =========================================================
   macos:
     runs-on: macos-14
